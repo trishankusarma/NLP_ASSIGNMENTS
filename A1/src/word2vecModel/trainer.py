@@ -4,121 +4,19 @@ import numpy as np
 from collections import Counter
 import time
 import os
-
+from .vocabulary import Vocabulary
+from .skip_gram_model import SkipGramModel
+from src.utils import (
+    plot_loss_curve
+)
 from config.hyper_parameters import (
-    VOCABULARY_MIN_FREQ,
     EMBEDDING_DIM,
     WINDOW_SIZE,
     NUM_NEGATIVE_SAMPLES,
     LEARNING_RATE,
     EPOCHS,
-    BATCH_SIZE,
-    NEG_SAMPLING_EXP_POWER
+    BATCH_SIZE
 )
-
-""" This class manages the Vocabulary structure for training """
-class Vocabulary:
-    def __init__(self):
-        self.min_freq = VOCABULARY_MIN_FREQ
-        self.word2idx = {}
-        self.idx2word = {}
-        self.word_counts = Counter()
-        self.vocab_size = 0
-    
-    def tokenize(self, text):
-        """Tokenizer :: Convert to lowercase and split the text based on whitespaces."""
-        """Will update this function accordingly"""
-        tokens = text.lower().split()
-        return tokens
-        
-    def build_vocab(self, given_text_data):
-        """Build vocabulary from given_text_data"""
-        
-        print("Tokenizing the given text data and buidling the vocabulary")
-        # Counting words
-        for text in given_text_data:
-            tokens = self.tokenize(text)
-            self.word_counts.update(tokens)
-        
-        # Filter by min_freq and build mappings
-        idx = 0
-        for word, count in self.word_counts.items():
-            if count >= self.min_freq:
-                self.word2idx[word] = idx
-                self.idx2word[idx] = word 
-                idx += 1
-        
-        self.vocab_size = len(self.word2idx)
-        print(f"Overall Vocabulary size: {self.vocab_size}")
-    
-    def get_negative_sampling_distribution(self):
-        """Create distribution for negative sampling (raised to 3/4 power)"""
-        
-        print("Creating distribution for negative sampling")
-        freq = np.zeros(self.vocab_size)
-        for word, idx in self.word2idx.items():
-            freq[idx] = self.word_counts[word]
-        
-        # Smooth the distribution
-        freq = np.power(freq, NEG_SAMPLING_EXP_POWER)
-        freq = freq / np.sum(freq)
-        return freq
-    
-    def encode(self, input_text):
-        """Convert text to list of indices :: this is for each text document """
-        tokens = self.tokenize(input_text)
-        return [self.word2idx[word] for word in tokens if word in self.word2idx]
-
-"""Skip-gram Word2Vec model implementation"""
-class SkipGramModel(nn.Module):
-    
-    def __init__(self, vocab_size, embedding_dim):
-        super(SkipGramModel, self).__init__()
-        self.vocab_size = vocab_size
-        self.embedding_dim = embedding_dim
-        
-        # Input embeddings (center word)
-        self.in_embeddings = nn.Embedding(vocab_size, embedding_dim)
-        # Output embeddings (context word)
-        self.out_embeddings = nn.Embedding(vocab_size, embedding_dim)
-        
-        # Initialize embeddings
-        self.in_embeddings.weight.data.uniform_(-0.5 / embedding_dim, 0.5 / embedding_dim)
-        self.out_embeddings.weight.data.uniform_(-0.5 / embedding_dim, 0.5 / embedding_dim)
-
-    def forward(self, center_words, context_words, negative_samples):
-        """
-        Args:
-            center_words: tensor of shape (batch_size,)
-            context_words: tensor of shape (batch_size,)
-            negative_samples: tensor of shape (batch_size, num_negative_samples)
-        Returns:
-            loss: scalar tensor
-        """
-        batch_size = center_words.size(0)
-        
-        # Get embeddings
-        center_embeds = self.in_embeddings(center_words)  # (batch_size, embedding_dim)
-        context_embeds = self.out_embeddings(context_words)  # (batch_size, embedding_dim)
-        neg_embeds = self.out_embeddings(negative_samples)  # (batch_size, num_neg, embedding_dim)
-        
-        eps = 1e-10
-        # Positive score
-        # dot product of center_words and context words 
-        pos_score = torch.sum(center_embeds * context_embeds, dim=1)  # (batch_size,) 
-        # Goal: Maximize probability that context word appears near center word :: So Minimize :: -log( sigmoid(pos_score) + eps )
-        pos_loss = -torch.log(torch.sigmoid(pos_score) + eps) 
-                
-        # Negative scores
-        # neg_embeds = (b, n, k) and center_embeds = (b, k) -> center_embeds.unsqueeze(2) -> (b, k, 1)
-        # bmm -> batch dot product -> (b, n, 1) -> squeeze -> (b, n)
-        neg_score = torch.bmm(neg_embeds, center_embeds.unsqueeze(2)).squeeze(2)  # (batch_size, num_neg)
-        # Goal: Maximize probability that negative words DON'T appear near center word :: So Minimize -log(sigmoid(-neg_score) + eps )
-        neg_loss = -torch.sum(torch.log(torch.sigmoid(-neg_score) + eps), dim=1)
-        
-        # Total loss
-        loss = torch.mean(pos_loss + neg_loss)
-        return loss
 
 """ Word2Vec Model Class - Trainer for the Skip-Gram model with Negative Sampling """
 class Word2VecTrainer:
@@ -159,11 +57,12 @@ class Word2VecTrainer:
         print(f"Generated {len(training_pairs)} training pairs")
         return training_pairs
 
-    def train(self, given_texts):
+    def train(self, given_texts, save_dir = '../output/training_loss_curve.png'):
         """Train the Word2Vec model"""
         training_pairs = self.generate_training_data(given_texts)
         
         self.model.train()
+        track_losses = []
 
         for epoch in range(self.epochs):
             total_loss = 0
@@ -201,6 +100,8 @@ class Word2VecTrainer:
                 # addding gradient cliping to avoid exploding gradient
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5.0)
                 self.optimizer.step()
+
+                track_losses.append(loss.item())
                 
                 total_loss += loss.item()
 
@@ -211,6 +112,9 @@ class Word2VecTrainer:
             overall_time_for_batch = time.time() - start_time
             avg_loss = total_loss / num_batches
             print(f"Epoch : {epoch+1} completed :: Avg_loss : {avg_loss} :: Overall time taken for batch : {overall_time_for_batch:.2f}s")
+        
+        # Plot loss curves
+        plot_loss_curve(track_losses, save_dir)
     
     def save_model(self, path):
         """Save model and vocabulary"""
@@ -246,6 +150,3 @@ def load_model(path):
     model.eval()
         
     return model, vocab, save_dict
-
-
-    

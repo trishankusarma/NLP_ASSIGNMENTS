@@ -5,7 +5,8 @@ Training model for Word2Vec using skipGram model
 import sys
 import glob # using glob to grab all the input data with .txt extention
 import os
-from src.word2vec import Vocabulary, Word2VecTrainer
+from src.word2vecModel.vocabulary import Vocabulary
+from src.word2vecModel.trainer import Word2VecTrainer
 
 def load_training_data(input_dir):
     # this function will help u load all the training data from the input directory
@@ -38,7 +39,7 @@ def main():
 
     # Step 3: Train the word2Vec model 
     trainer = Word2VecTrainer(vocab)
-    trainer.train(given_text_data)
+    trainer.train(given_text_data, save_dir = '../output/training_loss_curve.png')
 
     # Step 4: Save model
     trainer.save_model('../model/word2vec_model.pkl')

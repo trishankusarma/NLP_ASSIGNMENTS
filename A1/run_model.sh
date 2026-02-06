@@ -41,6 +41,8 @@ else
     # You are responsible for splitting this data into train/validation sets as needed.
     
     TRAIN_DIR=$1
+    echo "Spliting the data into train-test and generating the valdiation sets for task 1 and task 2"
+    python -m src.data_utils.py "$TRAIN_DIR"
     
     echo "Training model on data in $TRAIN_DIR..."
     # TODO: Call your python training script here
