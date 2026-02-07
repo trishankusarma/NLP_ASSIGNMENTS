@@ -29,19 +29,29 @@ class Vocabulary:
     def get_char_ngrams(self, word):
         """
         Get character n-grams for a word (FastText-style)
-        Adds special boundary symbols <> to capture prefixes/suffixes
-        "quick" → "<qu", "qui", "uic", "ick", "ck>"
+        Adaptively adjusts n-gram range based on word length
         """
-        word = f"<{word}>"
-        char_ngrams = []
+        word_with_boundaries = f"<{word}>"
+        word_length = len(word_with_boundaries)
         min_n, max_n = self.char_ngram_range
         
-        for n in range(min_n, max_n + 1):
-            for i in range(len(word) - n + 1):
-                ngram = word[i:i+n]
-                char_ngrams.append(ngram)
+        # Adjust n-gram range to fit word length
+        effective_min = min_n
+        effective_max = min(max_n, word_length)
         
-        return char_ngrams
+        char_ngrams = []
+
+        # always have one full word
+        char_ngrams.append(word_with_boundaries)
+
+        for n in range(effective_min, effective_max + 1):
+            for i in range(word_length - n + 1):
+                ngram = word_with_boundaries[i:i+n]
+                if ngram not in char_ngrams:  # Avoid duplicates
+                    char_ngrams.append(ngram)
+        
+        # Safety: always return at least one n-gram
+        return char_ngrams if char_ngrams else [word_with_boundaries]
     
     def get_word_ngrams(self, words):
         """
@@ -95,7 +105,7 @@ class Vocabulary:
             tokens = self.tokenize(text)
             self.word_counts.update(tokens)
 
-            print(f"Tokens generated for document {index} is len(tokens)")
+            print(f"Tokens generated for document {index} is {len(tokens)}")
         
         # Filter by min_freq and build mappings
         idx = 0

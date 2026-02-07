@@ -3,11 +3,14 @@ import torch.nn as nn
 import numpy as np
 from collections import Counter
 import time
+import json
 import os
+import sys
+import pickle
 from .vocabulary import Vocabulary
 from .skip_gram_model import SkipGramModel
 from src.utils import (
-    plot_loss_curve
+    plot_loss_curve, task1_inference
 )
 from config.hyper_parameters import (
     EMBEDDING_DIM,
@@ -17,6 +20,15 @@ from config.hyper_parameters import (
     EPOCHS,
     BATCH_SIZE
 )
+from tqdm import tqdm
+from src.AuthorAttribution import AuthorAttributor
+
+# getting gpu
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cpu"
+print(f"Using device: {device}")
+
+TASK_1_VAL_DIR = './split_data/test/task1_test.json'
 
 """ Word2Vec Model Class - Trainer for the Skip-Gram model with Negative Sampling """
 class Word2VecTrainer:
@@ -25,94 +37,128 @@ class Word2VecTrainer:
         self.embedding_dim = EMBEDDING_DIM
         self.window_size = WINDOW_SIZE
         self.num_negative_samples = NUM_NEGATIVE_SAMPLES
-        self.learning_rate = LEARNING_RATE
         self.epochs = EPOCHS
         self.batch_size = BATCH_SIZE
         
-        self.model = SkipGramModel(vocab.vocab_size, EMBEDDING_DIM)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=LEARNING_RATE)
-        
+        self.model = SkipGramModel(vocab.vocab_size, EMBEDDING_DIM).to(device)
+        self.initial_lr = LEARNING_RATE
+
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(),
+            lr=self.initial_lr
+        )
+
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.epochs)
+
         # Negative sampling distribution
         self.neg_dist = vocab.get_negative_sampling_distribution()
+
+        # Create Noise Table
+        print("Pre-computing Noise Table for speed...")
+        table_size = 10**7  # Standard size for Word2Vec
+        
+        # We sample indices proportional to the negative sampling distribution
+        # This only happens ONCE during initialization
+        self.noise_table = np.random.choice(
+            self.vocab.vocab_size, 
+            size=table_size, 
+            p=self.neg_dist
+        ).astype(np.int32)
+        
+        self.table_ptr = 0 # Pointer to track where we are in the table
+
+    def get_negative_samples(self, num_samples):
+        """Ultra-fast sampling from pre-computed noise table"""
+        # If we reach the end of the table, wrap around to the start
+        if self.table_ptr + num_samples >= len(self.noise_table):
+            self.table_ptr = 0
+            np.random.shuffle(self.noise_table) # Optional: reshuffle for variety
+
+        samples = self.noise_table[self.table_ptr : self.table_ptr + num_samples]
+        self.table_ptr += num_samples
+        return samples
     
-    def generate_training_data(self, input_text):
-        """Generate (center, context) pairs from input_text"""
-        print("Generating training pairs...(center_word, context_word)")
-        """[text_doc1, text_doc2,...., text_docn]"""
-        training_pairs = []
+    def generate_training_batches(self, input_text):
+        centers, contexts = [], []
         for text in input_text:
-            # now for each text document
             indices = self.vocab.encode(text)
             for i, center_word_idx in enumerate(indices):
-                # Get context window :: fetching the start and end idx of each center word
                 start = max(0, i - self.window_size)
                 end = min(len(indices), i + self.window_size + 1)
-                
                 for j in range(start, end):
                     if i != j:
-                        context = indices[j]
-                        training_pairs.append((center_word_idx, context)) # considering skip-gram
-                
-        # Finally we can expect window*vocab_size of pairs
-        print(f"Generated {len(training_pairs)} training pairs")
-        return training_pairs
+                        centers.append(center_word_idx)
+                        contexts.append(indices[j])
+                        if len(centers) == self.batch_size:
+                            yield (np.array(centers, dtype=np.int32), 
+                                   np.array(contexts, dtype=np.int32))
+                            centers, contexts = [], []
+        
+        # FINAL YIELD: Catch the last partial batch if it exists
+        if len(centers) > 0:
+            yield (np.array(centers, dtype=np.int32), 
+                   np.array(contexts, dtype=np.int32))
+        # return centers, contexts
 
     def train(self, given_texts, save_dir = '../output/training_loss_curve.png'):
-        """Train the Word2Vec model"""
-        training_pairs = self.generate_training_data(given_texts)
+        """Train the Word2Vec model with generator-based batches"""
         
+        # Load test data for validation
+        print(f"Loading test data from ...{TASK_1_VAL_DIR}")
+        with open(TASK_1_VAL_DIR, 'r', encoding='utf-8') as f:
+            queries = json.load(f)
+        
+        attributor = AuthorAttributor(self.model, self.vocab)
         self.model.train()
         track_losses = []
 
         for epoch in range(self.epochs):
-            total_loss = 0
-            np.random.shuffle(training_pairs)
-            num_batches = len(training_pairs) // self.batch_size
+            # 1. Shuffle documents at the start of each epoch for randomness
+            np.random.shuffle(given_texts)
 
+            total_loss = 0
             start_time = time.time()
 
-            for batch_id in range(num_batches):
-                # step 1: prepare batch
-                start_id = batch_id * self.batch_size
-                end_id = start_id + self.batch_size
-
-                # this is our training batch
-                curr_batch = training_pairs[start_id:end_id]
+            # 2. Use the generator and enumerate to get batch_id
+            batch_gen = self.generate_training_batches(given_texts)
+            
+            # Note: We use enumerate here so (batch_id+1) % 10000 works
+            for batch_id, (centers_np, contexts_np) in enumerate(tqdm(batch_gen, desc=f"Epoch {epoch+1}")): 
                 
-                # step 2: separating the center words and context words
-                center_words = torch.tensor([pair[0] for pair in curr_batch], dtype=torch.long)
-                context_words = torch.tensor([pair[1] for pair in curr_batch], dtype=torch.long)
+                current_batch_size = centers_np.shape[0] 
 
-                # step 3: sample negative pairs
-                negative_samples = np.random.choice(
-                    self.vocab.vocab_size,
-                    size=(self.batch_size, self.num_negative_samples),
-                    p=self.neg_dist
+                center_words = torch.from_numpy(centers_np).long().to(device)
+                context_words = torch.from_numpy(contexts_np).long().to(device)
+
+                # USE current_batch_size INSTEAD OF self.batch_size
+                num_neg = current_batch_size * self.num_negative_samples
+                neg_samples_np = self.get_negative_samples(num_neg).reshape(
+                    current_batch_size, self.num_negative_samples
                 )
-                negative_samples = torch.tensor(negative_samples, dtype=torch.long) # convert to long format
+                negative_samples = torch.from_numpy(neg_samples_np).long().to(device)
 
-                # Step 4: Forward pass
                 self.optimizer.zero_grad()
                 loss = self.model(center_words, context_words, negative_samples)
-                
-                # Step 5: Backward pass
                 loss.backward()
-                # addding gradient cliping to avoid exploding gradient
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5.0)
                 self.optimizer.step()
 
                 track_losses.append(loss.item())
-                
                 total_loss += loss.item()
 
-                if (batch_id+1) % 100 == 0:
+                # Periodic Logging
+                if (batch_id + 1) % 2000 == 0:
+                    avg = np.mean(track_losses[-100:])
                     time_elapsed = time.time() - start_time
-                    print(f"Epoch: {epoch+1}/{self.epochs} :: Batch : {batch_id+1}/{num_batches} :: loss : {loss.item():.4f} :: Cummulative time elapsed : {time_elapsed:.2f}s")
+                    tqdm.write(f"Batch : {batch_id+1} :: loss : {avg:.4f} :: Time : {time_elapsed:.2f}s")
             
-            overall_time_for_batch = time.time() - start_time
-            avg_loss = total_loss / num_batches
-            print(f"Epoch : {epoch+1} completed :: Avg_loss : {avg_loss} :: Overall time taken for batch : {overall_time_for_batch:.2f}s")
-        
+            # 3. Post-epoch updates
+            self.scheduler.step()
+            task1_inference(attributor, queries)
+            
+            avg_epoch_loss = total_loss / (batch_id + 1)
+            print(f"Epoch {epoch+1} completed :: Avg_loss: {avg_epoch_loss:.4f}")
+    
         # Plot loss curves
         plot_loss_curve(track_losses, save_dir)
     
@@ -136,17 +182,17 @@ class Word2VecTrainer:
             pickle.dump(save_dict, f)
         print(f"Model saved to {path}")
     
-@staticmethod
-def load_model(path):
-    """Load model and vocabulary"""
-    with open(path, 'rb') as f:
-        save_dict = pickle.load(f)
-        
-    vocab = save_dict['vocab']
-    embedding_dim = save_dict['embedding_dim']
-        
-    model = SkipGramModel(vocab.vocab_size, embedding_dim)
-    model.load_state_dict(save_dict['model_state'])
-    model.eval()
-        
-    return model, vocab, save_dict
+    @staticmethod
+    def load_model(path):
+        """Load model and vocabulary"""
+        with open(path, 'rb') as f:
+            save_dict = pickle.load(f)
+            
+        vocab = save_dict['vocab']
+        embedding_dim = save_dict['embedding_dim']
+            
+        model = SkipGramModel(vocab.vocab_size, embedding_dim).to(device)
+        model.load_state_dict(save_dict['model_state'])
+        model.eval()
+            
+        return model, vocab, save_dict
