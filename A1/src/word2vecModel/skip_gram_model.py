@@ -53,6 +53,29 @@ class SkipGramModel(nn.Module):
         loss = torch.mean(pos_loss + neg_loss)
         return loss
     
-    def get_embedding(self, word_idx):
-        """Get embedding for a word index"""
-        return self.in_embeddings.weight[word_idx].detach().cpu().numpy()
+    # def get_embedding(self, word_idx):
+    #     """Get embedding for a word index"""
+    #     return self.in_embeddings.weight[word_idx].detach().cpu().numpy()
+
+    def get_embedding(self, word_idx, vocab):
+        """
+        FastText-style embedding: word vector = mean(char n-gram vectors)
+        """
+        word = vocab.idx2word[word_idx]
+        device = self.in_embeddings.weight.device
+        
+        # Fallback for special tokens or non-alphabetic words
+        if not vocab.use_char_ngrams or not word.isalpha():
+            return self.in_embeddings.weight[word_idx].detach().cpu().numpy()
+        
+        # Get char n-gram ids
+        char_ngram_ids = vocab.get_char_ngram_ids(word)
+        
+        if not char_ngram_ids:
+            return self.in_embeddings.weight[word_idx].detach().cpu().numpy()
+        
+        # Convert to tensor on correct device
+        char_indices = torch.tensor(char_ngram_ids, dtype=torch.long, device=device)
+        char_vecs = self.in_embeddings.weight[char_indices]
+        
+        return char_vecs.mean(dim=0).detach().cpu().numpy()

@@ -6,132 +6,134 @@ from config.hyper_parameters import (
     VOCABULARY_MIN_FREQ,
     NEG_SAMPLING_EXP_POWER,
     USE_CHAR_NGRAMS,
-    CHAR_NGRAM_RANGE,
-    USE_WORDS_NGRAMS,
-    WORD_NGRAM_RANGE
+    CHAR_NGRAM_RANGE
 )
 
-""" This class manages the Vocabulary structure for training """
+"""
+Vocabulary manager for Word2Vec (Skip-gram)
+Optimized for stylometric author attribution
+"""
+
 class Vocabulary:
     def __init__(self):
         self.min_freq = VOCABULARY_MIN_FREQ
+
         self.word2idx = {}
         self.idx2word = {}
         self.word_counts = Counter()
         self.vocab_size = 0
 
-        # for n-gram support
+        # Character n-gram support (FastText-style)
         self.use_char_ngrams = USE_CHAR_NGRAMS
         self.char_ngram_range = CHAR_NGRAM_RANGE
-        self.use_word_ngrams = USE_WORDS_NGRAMS
-        self.word_ngram_range = WORD_NGRAM_RANGE
+
+        # UNK token
+        self.UNK = "<UNK>"
+        self.unk_idx = None
+
+        # Token regex: words + punctuation (stylometry-critical)
+        self.TOKEN_REGEX = r"[a-zA-Z0-9']+|[.,!?;:—\"]"
+    
+    def get_char_ngram_ids(self, word):
+        ngrams = self.get_char_ngrams(word)
+        return [
+            self.word2idx[ng]
+            for ng in ngrams
+            if ng in self.word2idx
+        ]
 
     def get_char_ngrams(self, word):
         """
-        Get character n-grams for a word (FastText-style)
-        Adaptively adjusts n-gram range based on word length
+        Generate character n-grams with boundary symbols
+        Only applied to alphanumeric words
         """
-        word_with_boundaries = f"<{word}>"
-        word_length = len(word_with_boundaries)
+        word = f"<{word}>"
         min_n, max_n = self.char_ngram_range
-        
-        # Adjust n-gram range to fit word length
-        effective_min = min_n
-        effective_max = min(max_n, word_length)
-        
-        char_ngrams = []
+        max_n = min(max_n, len(word))
 
-        # always have one full word
-        char_ngrams.append(word_with_boundaries)
+        ngrams = [word]  # full word always included
 
-        for n in range(effective_min, effective_max + 1):
-            for i in range(word_length - n + 1):
-                ngram = word_with_boundaries[i:i+n]
-                if ngram not in char_ngrams:  # Avoid duplicates
-                    char_ngrams.append(ngram)
-        
-        # Safety: always return at least one n-gram
-        return char_ngrams if char_ngrams else [word_with_boundaries]
-    
-    def get_word_ngrams(self, words):
-        """
-        Get word n-grams from a list of words
-        Example: ["the", "quick", "brown"] -> ["the", "quick", "brown", "the_quick", "quick_brown"]
-        """
-        word_ngrams = []
-        min_n, max_n = self.word_ngram_range
-        
         for n in range(min_n, max_n + 1):
-            for i in range(len(words) - n + 1):
-                ngram = "_".join(words[i:i+n])
-                word_ngrams.append(ngram)
-        
-        return word_ngrams
+            for i in range(len(word) - n + 1):
+                ngrams.append(word[i:i+n])
+
+        return ngrams
 
     def tokenize(self, text):
         """
-        Tokenization with n-gram support
-        Returns a list of tokens (words, character n-grams, or word n-grams)
+        Tokenize text into:
+        - lowercase words
+        - punctuation tokens
+        - optional char n-grams (for words only)
         """
-        # Basic tokenization: lowercase and extract words
         text = text.lower()
-        # Keep alphanumeric and basic punctuation
-        TOKEN_REGEX = r"[a-zA-Z0-9']+|[.,!?;:]"
-        words = re.findall(TOKEN_REGEX, text.lower())
-        
-        tokens = []
-        
-        # Adding word n-grams if enabled
-        if self.use_word_ngrams:
-            tokens.extend(self.get_word_ngrams(words))
-        else:
-            # Just use individual words
-            tokens.extend(words)
-        
-        # Adding character n-grams if enabled (for each word)
-        if self.use_char_ngrams:
-            for word in words:
-                char_ngrams = self.get_char_ngrams(word)
-                tokens.extend(char_ngrams)
-        
-        return tokens
-        
-    def build_vocab(self, given_text_data):
-        """Build vocabulary from given_text_data"""
-        
-        print("Tokenizing the given text data and buidling the vocabulary")
-        # Counting words
-        for index, text in enumerate(given_text_data):
+        tokens = re.findall(self.TOKEN_REGEX, text)
+
+        final_tokens = []
+
+        for tok in tokens:
+            final_tokens.append(tok)
+
+            # Add char n-grams ONLY for alphanumeric words
+            if self.use_char_ngrams and tok.isalnum():
+                final_tokens.extend(self.get_char_ngrams(tok))
+
+        return final_tokens
+
+    def build_vocab(self, text_data):
+        """
+        Build vocabulary with frequency filtering
+        Adds <UNK> at index 0
+        """
+        print("Building vocabulary...")
+
+        for i, text in enumerate(text_data):
             tokens = self.tokenize(text)
             self.word_counts.update(tokens)
+            print(f"Document {i}: {len(tokens)} tokens")
 
-            print(f"Tokens generated for document {index} is {len(tokens)}")
-        
-        # Filter by min_freq and build mappings
+        # Add UNK first
         idx = 0
-        for word, count in self.word_counts.items():
+        self.word2idx[self.UNK] = idx
+        self.idx2word[idx] = self.UNK
+        self.unk_idx = idx
+        idx += 1
+
+        # Stable ordering: most common tokens first
+        for token, count in self.word_counts.most_common():
             if count >= self.min_freq:
-                self.word2idx[word] = idx
-                self.idx2word[idx] = word 
+                self.word2idx[token] = idx
+                self.idx2word[idx] = token
                 idx += 1
-        
+
         self.vocab_size = len(self.word2idx)
-        print(f"Overall Vocabulary size: {self.vocab_size}")
-    
+        print(f"Vocabulary size (including UNK): {self.vocab_size}")
+
+    def encode(self, text):
+        """
+        Convert text into indices (UNK for unseen tokens)
+        """
+        tokens = self.tokenize(text)
+        return [
+            self.word2idx.get(tok, self.unk_idx)
+            for tok in tokens
+        ]
+
     def get_negative_sampling_distribution(self):
-        """Create distribution for negative sampling (raised to 3/4 power)"""
-        
-        print("Creating distribution for negative sampling")
+        """
+        Create smoothed unigram distribution for negative sampling
+        UNK is excluded
+        """
+        print("Creating negative sampling distribution...")
+
         freq = np.zeros(self.vocab_size)
-        for word, idx in self.word2idx.items():
-            freq[idx] = self.word_counts[word]
-        
-        # Smooth the distribution
+
+        for token, idx in self.word2idx.items():
+            if idx == self.unk_idx:
+                continue
+            freq[idx] = self.word_counts.get(token, 1)
+
         freq = np.power(freq, NEG_SAMPLING_EXP_POWER)
         freq = freq / np.sum(freq)
+
         return freq
-    
-    def encode(self, input_text):
-        """Convert text to list of indices :: this is for each text document """
-        tokens = self.tokenize(input_text)
-        return [self.word2idx[word] for word in tokens if word in self.word2idx]

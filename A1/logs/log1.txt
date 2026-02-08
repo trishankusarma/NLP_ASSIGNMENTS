@@ -1,0 +1,70 @@
+(base) [aiy257584@scai04 ~/scratch/MSR_IITD_2nd_Sem/NLP_ASSIGNMENTS/A1]
+$ bash run_model.sh ./data/train_data
+Training model...
+Training Word2Vec model with skip-grams
+Loading data from split_data/train
+Loading data from split_data/train/author_001.txt
+Loading data from split_data/train/author_002.txt
+Loading data from split_data/train/author_003.txt
+Loading data from split_data/train/author_004.txt
+Loading data from split_data/train/author_005.txt
+Loading data from split_data/train/author_006.txt
+Loading data from split_data/train/author_007.txt
+Loading data from split_data/train/author_008.txt
+Loading data from split_data/train/author_009.txt
+Loading data from split_data/train/author_010.txt
+Data loaded
+Building vocabulary...
+Document 0: 829201 tokens
+Document 1: 553047 tokens
+Document 2: 526811 tokens
+Document 3: 435491 tokens
+Document 4: 592813 tokens
+Document 5: 797497 tokens
+Document 6: 468117 tokens
+Document 7: 836683 tokens
+Document 8: 764373 tokens
+Document 9: 771813 tokens
+Vocabulary size (including UNK): 34188
+Creating negative sampling distribution...
+Pre-computing Noise Table...
+Loading validation data from ./split_data/test/task1_test.json
+
+Epoch 1/5 | LR = 0.050000
+62710it [06:31, 160.14it/s]
+Epoch 1 done | Avg Loss = 4.1221 | Time = 391.59s
+Validating on Task 1...
+Processing 20 queries...
+Overall Score achieved is 10.720238095238097 and the rank_list is : [5, 10, 2, 8, 3, 1, 1, 7, 1, 2, 1, 1, 2, 7, 5, 7, 1, 1, 2, 3]
+
+Epoch 2/5 | LR = 0.040000
+62701it [07:15, 144.01it/s]
+Epoch 2 done | Avg Loss = 3.9842 | Time = 435.40s
+Validating on Task 1...
+Processing 20 queries...
+Overall Score achieved is 11.061904761904762 and the rank_list is : [7, 10, 2, 10, 1, 1, 1, 7, 1, 2, 1, 1, 6, 10, 3, 7, 1, 1, 2, 3]
+
+Epoch 3/5 | LR = 0.030000
+62682it [07:13, 144.51it/s]
+Epoch 3 done | Avg Loss = 3.7724 | Time = 433.74s
+Validating on Task 1...
+Processing 20 queries...
+Overall Score achieved is 12.167857142857143 and the rank_list is : [7, 10, 1, 10, 1, 1, 1, 8, 1, 1, 1, 1, 6, 10, 2, 10, 1, 1, 2, 3]
+
+Epoch 4/5 | LR = 0.020000
+62685it [07:11, 145.36it/s]
+Epoch 4 done | Avg Loss = 3.6193 | Time = 431.25s
+Validating on Task 1...
+Processing 20 queries...
+Overall Score achieved is 12.59563492063492 and the rank_list is : [7, 10, 1, 10, 1, 1, 1, 8, 1, 1, 1, 1, 6, 9, 1, 10, 1, 1, 2, 4]
+
+Epoch 5/5 | LR = 0.010000
+62702it [07:00, 149.08it/s]
+Epoch 5 done | Avg Loss = 3.5359 | Time = 420.61s
+Validating on Task 1...
+Processing 20 queries...
+Overall Score achieved is 12.59563492063492 and the rank_list is : [7, 10, 1, 10, 1, 1, 1, 8, 1, 1, 1, 1, 6, 9, 1, 10, 1, 1, 2, 4]
+Loss curve saved to ./output/loss_plot.png
+✓ Training complete
+Training completed successfully!
+Training completed!

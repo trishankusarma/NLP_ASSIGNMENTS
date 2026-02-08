@@ -6,8 +6,8 @@ import sys
 import glob
 import os
 
-PLOT_DIR = '../output'
-MODEL_DIR = '../model/word2vec_model.pkl'
+PLOT_DIR = './output'
+MODEL_DIR = './model/word2vec_model.pkl'
 
 def load_training_data(input_dir):
     print(f"Loading data from {input_dir}")
