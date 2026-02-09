@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Sentence-based data split (FastText-style philosophy)
-Chunks are ONLY used for Task 1 / Task 2 evaluation
+Training uses SENTENCES
+Evaluation uses CHUNKS drawn from FULL corpus (train + test)
 """
 
 import os
@@ -19,40 +20,37 @@ from config.hyper_parameters import (
     TRAIN_RATIO
 )
 
-# Output directories
+# Output
 OUTPUT_DIR_TRAIN = 'split_data/train'
 OUTPUT_DIR_TEST  = 'split_data/test'
 TASK1_TEST_JSON  = 'task1_test.json'
 TASK2_TEST_JSON  = 'task2_test.json'
 
-NUM_QUERIES = 20
+# Evaluation scale
+NUM_QUERIES = 100
 NUM_CANDIDATES = 10
-NUM_AUTHORS = 5
-MINM_CHUNKS_PER_AUTHOR = 5
+
+NUM_TASK2_CASES = 100
+NUM_AUTHORS = 10
+MINM_CHUNKS_PER_AUTHOR = 10
 
 random.seed(SEED)
 np.random.seed(SEED)
-
 
 class DataSplitter:
 
     def __init__(self, data_dir):
         self.data_dir = data_dir
 
-    # --------------------------------------------------
-    # Sentence splitting (CRITICAL CHANGE)
-    # --------------------------------------------------
+    # Sentence splitting
     def split_into_sentences(self, text):
-        sentences = [
+        return [
             s.strip()
             for s in re.split(r'(?<=[.!?])\s+', text)
             if len(s.strip().split()) >= 5
         ]
-        return sentences
 
-    # --------------------------------------------------
-    # Chunking ONLY for test data
-    # --------------------------------------------------
+    # Chunking (NO overlap, eval only)
     def text_to_chunks(self, text):
         words = text.split()
         chunks = []
@@ -65,22 +63,20 @@ class DataSplitter:
             if len(chunk) >= MINM_CHUNK_SIZE:
                 chunks.append(" ".join(chunk))
 
-            i += size   # ❗ NO OVERLAP (important)
+            i += size
 
         return chunks
 
-    # --------------------------------------------------
-    # Load and split data
-    # --------------------------------------------------
+    # Load and split
     def load_and_split(self):
         train_data = defaultdict(list)
-        test_chunks = defaultdict(list)
+        eval_chunks = defaultdict(list)
 
         files = sorted(glob.glob(os.path.join(self.data_dir, "author_*.txt")))
         print(f"Found {len(files)} author files")
 
         for path in files:
-            author_id = os.path.basename(path).replace(".txt", "")
+            author = os.path.basename(path).replace(".txt", "")
             text = open(path, encoding="utf-8").read()
 
             sentences = self.split_into_sentences(text)
@@ -88,66 +84,61 @@ class DataSplitter:
 
             split_idx = int(len(sentences) * TRAIN_RATIO)
             train_sents = sentences[:split_idx]
-            test_sents  = sentences[split_idx:]
+            heldout_sents = sentences[split_idx:]
 
-            # Training uses SENTENCES
-            train_data[author_id] = train_sents
+            # Training
+            train_data[author] = train_sents
 
-            # Test uses CHUNKS
-            test_text = " ".join(test_sents)
-            test_chunks[author_id] = self.text_to_chunks(test_text)
+            # Evaluation pool = ALL text
+            full_text = " ".join(train_sents + heldout_sents)
+            eval_chunks[author] = self.text_to_chunks(full_text)
 
             print(
-                f"{author_id}: "
+                f"{author}: "
                 f"train sentences={len(train_sents)}, "
-                f"test chunks={len(test_chunks[author_id])}"
+                f"eval chunks={len(eval_chunks[author])}"
             )
 
-        return train_data, test_chunks
+        return train_data, eval_chunks
 
-    # --------------------------------------------------
-    # Save training text
-    # --------------------------------------------------
+    # Save training data
     def save_train_data(self, train_data):
         os.makedirs(OUTPUT_DIR_TRAIN, exist_ok=True)
 
-        for author, sentences in train_data.items():
+        for author, sents in train_data.items():
             path = os.path.join(OUTPUT_DIR_TRAIN, f"{author}.txt")
             with open(path, "w", encoding="utf-8") as f:
-                f.write("\n".join(sentences))
+                f.write("\n".join(sents))
             print(f"Saved {path}")
 
-    # --------------------------------------------------
-    # Task 1
-    # --------------------------------------------------
-    def generate_task1_test(self, test_chunks):
+    # Task 1 (200 queries)
+    def generate_task1_test(self, eval_chunks):
         test_cases = []
-        authors = list(test_chunks.keys())
+        authors = list(eval_chunks.keys())
 
-        for qi in range(NUM_QUERIES):
+        while len(test_cases) < NUM_QUERIES:
             author = random.choice(authors)
-            chunks = test_chunks[author]
+            chunks = eval_chunks[author]
 
             if len(chunks) < 3:
                 continue
 
             query = random.choice(chunks)
-            far_chunk = chunks[len(chunks)//2]
+            pos = random.choice([c for c in chunks if c != query])
 
-            candidates = {'cand_0': far_chunk}
-
+            candidates = {'cand_0': pos}
             others = [a for a in authors if a != author]
+
             for i in range(1, NUM_CANDIDATES):
                 oa = random.choice(others)
-                candidates[f'cand_{i}'] = random.choice(test_chunks[oa])
+                candidates[f'cand_{i}'] = random.choice(eval_chunks[oa])
 
             items = list(candidates.items())
             random.shuffle(items)
-
-            gt = next(k for k, v in items if v == far_chunk)
+            gt = next(k for k, v in items if v == pos)
 
             test_cases.append({
-                'query_id': f'query_{qi}',
+                'query_id': f'query_{len(test_cases)}',
                 'query_text': query,
                 'candidates': dict(items),
                 '_ground_truth': gt
@@ -155,41 +146,42 @@ class DataSplitter:
 
         return test_cases
 
-    # --------------------------------------------------
-    # Task 2
-    # --------------------------------------------------
-    def generate_task2_test(self, test_chunks):
+    # Task 2 (200 clustering problems)
+    def generate_task2_test(self, eval_chunks):
         valid_authors = [
-            a for a in test_chunks
-            if len(test_chunks[a]) >= MINM_CHUNKS_PER_AUTHOR
+            a for a in eval_chunks
+            if len(eval_chunks[a]) >= MINM_CHUNKS_PER_AUTHOR
         ]
 
-        chosen = random.sample(valid_authors, NUM_AUTHORS)
+        cases = []
 
-        texts, labels = [], []
-        for idx, author in enumerate(chosen):
-            chunks = random.sample(
-                test_chunks[author],
-                MINM_CHUNKS_PER_AUTHOR
-            )
-            for c in chunks:
-                texts.append(c)
-                labels.append(idx)
+        for _ in range(NUM_TASK2_CASES):
+            chosen = random.sample(valid_authors, NUM_AUTHORS)
 
-        combined = list(zip(texts, labels))
-        random.shuffle(combined)
-        texts, labels = zip(*combined)
+            texts, labels = [], []
+            for idx, author in enumerate(chosen):
+                chunks = random.sample(
+                    eval_chunks[author],
+                    MINM_CHUNKS_PER_AUTHOR
+                )
+                for c in chunks:
+                    texts.append(c)
+                    labels.append(idx)
 
-        return {
-            'num_authors': NUM_AUTHORS,
-            'min_chunks_per_author': MINM_CHUNKS_PER_AUTHOR,
-            'chunks': list(texts),
-            '_ground_truth': list(labels)
-        }
+            combined = list(zip(texts, labels))
+            random.shuffle(combined)
+            texts, labels = zip(*combined)
 
-    # --------------------------------------------------
+            cases.append({
+                'num_authors': NUM_AUTHORS,
+                'min_chunks_per_author': MINM_CHUNKS_PER_AUTHOR,
+                'chunks': list(texts),
+                '_ground_truth': list(labels)
+            })
+
+        return cases
+
     # Save test files
-    # --------------------------------------------------
     def save_tests(self, task1, task2):
         os.makedirs(OUTPUT_DIR_TEST, exist_ok=True)
 
@@ -210,11 +202,11 @@ def main():
 
     splitter = DataSplitter(sys.argv[1])
 
-    train_data, test_chunks = splitter.load_and_split()
+    train_data, eval_chunks = splitter.load_and_split()
     splitter.save_train_data(train_data)
 
-    task1 = splitter.generate_task1_test(test_chunks)
-    task2 = splitter.generate_task2_test(test_chunks)
+    task1 = splitter.generate_task1_test(eval_chunks)
+    task2 = splitter.generate_task2_test(eval_chunks)
 
     splitter.save_tests(task1, task2)
 

@@ -60,10 +60,12 @@ def task1_inference(attributor, queries, output_needed = False):
         if output_needed:
             # Write output
             output.append({
-                'query_id': query_id,
-                'ranked_candidates': ranked_ids,
-                "score" : score
+                "query_id": query_id,
+                "ranked_candidates": ranked_ids
             })
     
+    MRR = overall_score/len(queries)
+    
     print(f"Overall Score achieved is {overall_score} and the rank_list is : {rank_list_of_queries}")
+    print(f"MRR : {MRR}")
     return output

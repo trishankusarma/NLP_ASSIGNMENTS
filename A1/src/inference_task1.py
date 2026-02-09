@@ -10,7 +10,7 @@ from src.word2vecModel.trainer import Word2VecTrainer
 from src.AuthorAttribution import AuthorAttributor
 from src.utils import task1_inference
 
-MODEL_DIR = '../model/word2vec_model.pkl'
+MODEL_DIR = './model/word2vec_model.pkl'
 OUTPUT_FILE_NAME = 'task1_predictions.jsonl'
 
 def main():
@@ -37,9 +37,10 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, OUTPUT_FILE_NAME)
 
-    with open(output_file, 'w', encoding='utf-8') as f_out:
+    with open(output_file, "w", encoding="utf-8") as f_out:
         output = task1_inference(attributor, queries, output_needed = True)
-        f_out.write(json.dumps(output) + '\n')
+        for obj in output:
+            f_out.write(json.dumps(obj) + "\n")
     
     print(f"Predictions saved to {output_file}")
 

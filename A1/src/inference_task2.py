@@ -7,10 +7,10 @@ Usage: python task2_inference.py <test_file> <output_dir>
 import sys
 import json
 import os
-from word2vec import Word2VecTrainer
-from author_attribution import AuthorAttributor
+from src.word2vecModel.trainer import Word2VecTrainer
+from src.AuthorAttribution import AuthorAttributor
 
-MODEL_DIR = '../model/word2vec_model.pkl'
+MODEL_DIR = './model/word2vec_model.pkl'
 OUTPUT_FILE_NAME = 'task2_predictions.jsonl'
 
 def main():
@@ -41,7 +41,7 @@ def main():
     print(f"Minimum chunks per author: {min_chunks_per_author}")
 
     # Cluster texts
-    cluster_assignments = attributor.task2_cluster_authors(chunks, num_authors, min_chunks_per_author)
+    cluster_assignments = attributor.task2_cluster_authors(chunks, num_authors)
 
     # Save output
     os.makedirs(output_dir, exist_ok=True)
