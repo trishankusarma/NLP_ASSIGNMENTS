@@ -1,11 +1,12 @@
 import numpy as np
-from sklearn.cluster import KMeans
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.preprocessing import normalize
+from k_means_constrained import KMeansConstrained
 from collections import Counter
 import torch
+import torch.optim as optim
 import re
-import random
+from src.utils import (
+    normalize, cosine_similarity
+)
 
 class AuthorAttributor:
     """
@@ -49,30 +50,132 @@ class AuthorAttributor:
         ranked = np.argsort(sims)[::-1]
 
         return [candidate_ids[i] for i in ranked]
-
-    # TASK 2 — CLUSTERING
-    def task2_cluster_authors(self, texts, num_authors):
-        """Cluster texts by author using K-Means"""
-        print(f"Clustering {len(texts)} chunks into {num_authors} authors...")
+    
+    def task2_cluster_authors(self, texts, num_authors, min_chunks_per_author, fine_tune=False):
+        """
+        Cluster using KMeansConstrained for balanced clusters
         
+        Args:
+            texts: Text chunks
+            num_authors: Number of authors
+            fine_tune: Whether to fine-tune first
+        """
+        print(f"\nClustering {len(texts)} chunks into {num_authors} authors...")
+        
+        if fine_tune:
+            self.fine_tune_on_test_chunks(texts, num_epochs=3, lr=0.005)
+        
+        # Get embeddings
         embeddings = np.array([
             self.get_combined_representation(t) for t in texts
         ])
         
+        print(f"Embedding shape: {embeddings.shape}")
+        
+        # Diagnostics
+        sim_matrix = cosine_similarity(embeddings)
+        avg_sim = (sim_matrix.sum() - len(embeddings)) / (len(embeddings) * (len(embeddings) - 1))
+        print(f"Avg pairwise similarity: {avg_sim:.4f}")
+        
         # L2 normalize
         embeddings = normalize(embeddings, norm='l2')
         
-        # K-Means with strong initialization
-        kmeans = KMeans(
+        # Calculate size constraints
+        n_chunks = len(texts)
+        size_min = min_chunks_per_author  # Minimum per cluster
+        size_max = size_min + 1              # Maximum per cluster
+        
+        print(f"\nSize constraints: min={size_min}, max={size_max} per cluster")
+        
+        # KMeansConstrained clustering
+        clf = KMeansConstrained(
             n_clusters=num_authors,
-            n_init=50,           # Try 50 initializations
+            size_min=size_min,
+            size_max=size_max,
+            n_init=100,           # Try 100 initializations
             max_iter=500,
-            random_state=42,
-            algorithm='lloyd'
+            random_state=42
         )
         
-        labels = kmeans.fit_predict(embeddings)
+        labels = clf.fit_predict(embeddings)
         
-        print(f"✓ Inertia: {kmeans.inertia_:.4f}")
+        # Show results
+        counts = Counter(labels)
+        sizes = sorted(counts.values(), reverse=True)
+        
+        print(f"\nCluster distribution: {sizes}")
+        print(f"Min: {min(sizes)}, Max: {max(sizes)}")
+        print(f"Inertia: {clf.inertia_:.4f}")
         
         return labels.tolist()
+
+    def fine_tune_on_test_chunks(self, texts, num_epochs=2, lr=0.0005):
+        """Fast fine-tuning with batched updates"""
+        print(f"Fine-tuning on {len(texts)} test chunks...")
+        
+        self.model.train()
+        optimizer = optim.Adam(self.model.parameters(), lr=lr)
+        
+        # Collect skip-gram pairs
+        pairs = []
+        for text in texts:
+            indices = self.vocab.encode(text)
+            if len(indices) < 5:
+                continue
+            
+            for i, center_idx in enumerate(indices):
+                if center_idx == self.vocab.unk_idx:
+                    continue
+                
+                word = self.vocab.idx2word[center_idx]
+                if not word.isalnum():
+                    continue
+                
+                window = 2
+                start = max(0, i - window)
+                end = min(len(indices), i + window + 1)
+                
+                for j in range(start, end):
+                    if i != j:
+                        pairs.append((center_idx, indices[j]))
+        
+        if not pairs:
+            print("  No valid pairs for fine-tuning")
+            self.model.eval()
+            return
+        
+        print(f"Generated {len(pairs)} pairs")
+        
+        # Batch training
+        batch_size = 512
+        for epoch in range(num_epochs):
+            np.random.shuffle(pairs)
+            epoch_loss = 0
+            n_batches = 0
+            
+            for batch_start in range(0, len(pairs), batch_size):
+                batch = pairs[batch_start:batch_start + batch_size]
+                if len(batch) < 10:
+                    continue
+                
+                centers = torch.tensor([p[0] for p in batch], dtype=torch.long)
+                contexts = torch.tensor([p[1] for p in batch], dtype=torch.long)
+                
+                center_emb = self.model.in_embeddings(centers)
+                context_emb = self.model.out_embeddings(contexts)
+                
+                pos_scores = (center_emb * context_emb).sum(dim=1)
+                loss = -torch.log(torch.sigmoid(pos_scores) + 1e-10).mean()
+                
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                
+                epoch_loss += loss.item()
+                n_batches += 1
+            
+            if n_batches > 0:
+                print(f"  Epoch {epoch+1}/{num_epochs}: Loss = {epoch_loss/n_batches:.4f}")
+        
+        self.model.eval()
+        print("Fine-tuning complete\n")

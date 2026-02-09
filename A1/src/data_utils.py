@@ -172,7 +172,7 @@ class DataSplitter:
             'min_chunks_per_author': MINM_CHUNKS_PER_AUTHOR,
             'chunks': list(texts),
             '_ground_truth': list(labels)
-        }`
+        }
 
     # Save test files
     def save_tests(self, task1, task2):

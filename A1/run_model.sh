@@ -1,5 +1,8 @@
 #!/bin/bash
 
+export PYTHONWARNINGS=ignore
+export OMP_NUM_THREADS=1
+
 cd "$(dirname "$0")"
 set -e
 

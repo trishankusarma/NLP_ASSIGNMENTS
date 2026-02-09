@@ -10,7 +10,7 @@ import pickle
 from .vocabulary import Vocabulary
 from .skip_gram_model import SkipGramModel
 from src.utils import (
-    plot_loss_curve, task1_inference
+    plot_loss_curve, task1_inference, task2_inference
 )
 from config.hyper_parameters import (
     EMBEDDING_DIM,
@@ -23,12 +23,13 @@ from config.hyper_parameters import (
 from tqdm import tqdm
 from src.AuthorAttribution import AuthorAttributor
 
-torch.set_num_threads(8)
-torch.set_num_interop_threads(8)
+torch.set_num_threads(4)
+torch.set_num_interop_threads(4)
 
 device = "cpu"
 
 TASK_1_VAL_DIR = './split_data/test/task1_test.json'
+TASK_2_VAL_DIR = './split_data/test/task2_test.json'
 
 class Word2VecTrainer:
     def __init__(self, vocab):
@@ -118,7 +119,10 @@ class Word2VecTrainer:
     def train(self, given_texts, save_dir='../output/training_loss_curve.png'):
         print(f"Loading validation data from {TASK_1_VAL_DIR}")
         with open(TASK_1_VAL_DIR, 'r', encoding='utf-8') as f:
-            queries = json.load(f)
+            queries1 = json.load(f)
+        
+        with open(TASK_2_VAL_DIR, 'r', encoding='utf-8') as f:
+            queries2 = json.load(f)
 
         attributor = AuthorAttributor(self.model, self.vocab, training_texts=given_texts)
         self.model.train()
@@ -175,7 +179,13 @@ class Word2VecTrainer:
             )
 
             print("Validating on Task 1...")
-            task1_inference(attributor, queries)
+            task1_inference(attributor, queries1)
+            task2_inference(attributor, queries2, fine_tune = False)
+
+            MODEL_DIR = f'./model/word2vec_model_checkpoint{epoch+1}.pkl'
+
+            # saving on each checkpoint
+            self.save_model(MODEL_DIR)
 
         plot_loss_curve(track_losses, save_dir)
         print("Training complete")

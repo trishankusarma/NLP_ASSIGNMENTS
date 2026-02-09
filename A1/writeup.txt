@@ -1,0 +1,26 @@
+2
+Even though I have taken help from the following students and LLMs in terms of
+discussing ideas and coding practices, all my code is written by me.
+Students I took help and discussed with : Sidharthan Dileep(2025AIY7585), Siddharth Tamak, LLMs. They helped me understand the data pre-processing and tokenization better.
+And also helped in evaluation.
+
+Used model:
+- Skipgram with negative sampling
+- Used Character level embeddings
+- Optimizer - SGD
+- Generated samples on the flow
+
+Following are the hyper-parameters used :
+# All hyperparameters would be here : 
+
+VOCABULARY_MIN_FREQ = 5
+EMBEDDING_DIM = 150
+WINDOW_SIZE = 4
+NUM_NEGATIVE_SAMPLES = 5
+LEARNING_RATE = 0.05
+EPOCHS = 3
+BATCH_SIZE = 256
+NEG_SAMPLING_EXP_POWER = 0.75
+
+USED CHAR-NGRAMS = True
+CHAR_NGRAM_RANGE = (4, 5)
