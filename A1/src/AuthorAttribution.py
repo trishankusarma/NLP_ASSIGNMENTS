@@ -1,10 +1,11 @@
 import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.preprocessing import normalize
 from collections import Counter
 import torch
 import re
-
+import random
 
 class AuthorAttributor:
     """
@@ -15,29 +16,6 @@ class AuthorAttributor:
         self.model = model
         self.vocab = vocab
         self.model.eval()
-
-    # IDF (DOCUMENT FREQUENCY)
-    def _compute_idf_values(self, texts):
-        """
-        IDF(token) = log((N + 1) / (df + 1))
-        """
-        print("Computing document-frequency IDF values...")
-
-        doc_freq = Counter()
-        N = len(texts)
-
-        for text in texts:
-            tokens = set(self.vocab.tokenize(text))
-            for tok in tokens:
-                if tok.isalnum():  # IDF only for real words
-                    doc_freq[tok] += 1
-
-        self.idf = {
-            tok: np.log((N + 1) / (df + 1))
-            for tok, df in doc_freq.items()
-        }
-
-        print(f"Computed IDF for {len(self.idf)} tokens")
 
     # WORD2VEC AGGREGATION
     def text_to_embedding(self, text):
@@ -54,7 +32,7 @@ class AuthorAttributor:
 
         return np.mean(embeddings, axis=0)
 
-    # COMBINED REPRESENTATION
+    # COMBINED REPRESENTATION - moved only to document embeddings
     def get_combined_representation(self, text):
         w2v = self.text_to_embedding(text)
         return w2v
@@ -74,15 +52,27 @@ class AuthorAttributor:
 
     # TASK 2 — CLUSTERING
     def task2_cluster_authors(self, texts, num_authors):
+        """Cluster texts by author using K-Means"""
+        print(f"Clustering {len(texts)} chunks into {num_authors} authors...")
+        
         embeddings = np.array([
             self.get_combined_representation(t) for t in texts
         ])
-
+        
+        # L2 normalize
+        embeddings = normalize(embeddings, norm='l2')
+        
+        # K-Means with strong initialization
         kmeans = KMeans(
             n_clusters=num_authors,
-            n_init=20,
+            n_init=50,           # Try 50 initializations
             max_iter=500,
-            random_state=42
+            random_state=42,
+            algorithm='lloyd'
         )
-
-        return kmeans.fit_predict(embeddings).tolist()
+        
+        labels = kmeans.fit_predict(embeddings)
+        
+        print(f"✓ Inertia: {kmeans.inertia_:.4f}")
+        
+        return labels.tolist()

@@ -23,13 +23,12 @@ from config.hyper_parameters import (
 from tqdm import tqdm
 from src.AuthorAttribution import AuthorAttributor
 
-torch.set_num_threads(4)
-torch.set_num_interop_threads(4)
+torch.set_num_threads(8)
+torch.set_num_interop_threads(8)
 
 device = "cpu"
 
 TASK_1_VAL_DIR = './split_data/test/task1_test.json'
-
 
 class Word2VecTrainer:
     def __init__(self, vocab):
@@ -83,15 +82,15 @@ class Word2VecTrainer:
 
             for i, center_idx in enumerate(indices):
 
-                # ❌ Skip UNK as center
+                # Skip UNK as center
                 if center_idx == self.vocab.unk_idx:
                     continue
 
-                # ❌ Skip punctuation as center
+                # Skip punctuation as center
                 if center_idx in self.punct_indices:
                     continue
 
-                # ✅ Dynamic window (VERY IMPORTANT)
+                # Dynamic window 
                 window = np.random.randint(1, self.window_size + 1)
                 start = max(0, i - window)
                 end = min(len(indices), i + window + 1)
@@ -159,7 +158,7 @@ class Word2VecTrainer:
                 loss.backward()
                 self.optimizer.step()
 
-                # ✅ Embedding normalization (important for clustering)
+                # Embedding normalization (important for clustering)
                 with torch.no_grad():
                     self.model.in_embeddings.weight.div_(
                         self.model.in_embeddings.weight.norm(dim=1, keepdim=True) + 1e-8
@@ -179,7 +178,7 @@ class Word2VecTrainer:
             task1_inference(attributor, queries)
 
         plot_loss_curve(track_losses, save_dir)
-        print("✓ Training complete")
+        print("Training complete")
 
     def save_model(self, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)

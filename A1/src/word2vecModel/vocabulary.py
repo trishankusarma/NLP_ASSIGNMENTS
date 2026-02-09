@@ -60,24 +60,48 @@ class Vocabulary:
         return ngrams
 
     def tokenize(self, text):
-        """
-        Tokenize text into:
-        - lowercase words
-        - punctuation tokens
-        - optional char n-grams (for words only)
-        """
+        """Enhanced tokenization with stylometric markers"""
         text = text.lower()
+        
+        # Remove boilerplate
+        boilerplate_patterns = [
+            r'(?i)^\s*(produced by|copyright|all rights reserved).*$',
+            r'(?i)^\s*(table of contents|contents)\s*$',
+        ]
+        for pat in boilerplate_patterns:
+            text = re.sub(pat, " ", text, flags=re.MULTILINE)
+        
+        # Map punctuation patterns
+        punct_map = [
+            (r'\.{3,}', '<ellipsis>'),
+            (r'!{2,}', '<exclam>'),
+            (r'\?{2,}', '<question>'),
+            (r'--+', '<dash>'),
+        ]
+        for pat, repl in punct_map:
+            text = re.sub(pat, repl, text)
+        
+        # Tokenize
         tokens = re.findall(self.TOKEN_REGEX, text)
-
+        
         final_tokens = []
-
         for tok in tokens:
-            final_tokens.append(tok)
-
-            # Add char n-grams ONLY for alphanumeric words
+            # Add case markers BEFORE lowercasing
+            if tok.isupper() and len(tok) > 1:
+                final_tokens.append(tok.lower())
+                final_tokens.append('<allcap>')
+            elif tok[0].isupper() and tok[1:].islower():
+                final_tokens.append(tok.lower())
+                final_tokens.append('<cap>')
+            elif tok.isalpha():
+                final_tokens.append(tok.lower())
+            else:
+                final_tokens.append(tok)
+            
+            # Add char n-grams for words
             if self.use_char_ngrams and tok.isalnum():
-                final_tokens.extend(self.get_char_ngrams(tok))
-
+                final_tokens.extend(self.get_char_ngrams(tok.lower()))
+        
         return final_tokens
 
     def build_vocab(self, text_data):

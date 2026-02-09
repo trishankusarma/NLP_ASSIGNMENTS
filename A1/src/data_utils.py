@@ -27,12 +27,11 @@ TASK1_TEST_JSON  = 'task1_test.json'
 TASK2_TEST_JSON  = 'task2_test.json'
 
 # Evaluation scale
-NUM_QUERIES = 100
+NUM_QUERIES = 50
 NUM_CANDIDATES = 10
 
-NUM_TASK2_CASES = 100
 NUM_AUTHORS = 10
-MINM_CHUNKS_PER_AUTHOR = 10
+MINM_CHUNKS_PER_AUTHOR = 5
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -146,40 +145,34 @@ class DataSplitter:
 
         return test_cases
 
-    # Task 2 (200 clustering problems)
     def generate_task2_test(self, eval_chunks):
         valid_authors = [
             a for a in eval_chunks
             if len(eval_chunks[a]) >= MINM_CHUNKS_PER_AUTHOR
         ]
 
-        cases = []
+        chosen = random.sample(valid_authors, NUM_AUTHORS)
 
-        for _ in range(NUM_TASK2_CASES):
-            chosen = random.sample(valid_authors, NUM_AUTHORS)
+        texts, labels = [], []
+        for idx, author in enumerate(chosen):
+            chunks = random.sample(
+                eval_chunks[author],
+                MINM_CHUNKS_PER_AUTHOR
+            )
+            for c in chunks:
+                texts.append(c)
+                labels.append(idx)
 
-            texts, labels = [], []
-            for idx, author in enumerate(chosen):
-                chunks = random.sample(
-                    eval_chunks[author],
-                    MINM_CHUNKS_PER_AUTHOR
-                )
-                for c in chunks:
-                    texts.append(c)
-                    labels.append(idx)
+        combined = list(zip(texts, labels))
+        random.shuffle(combined)
+        texts, labels = zip(*combined)
 
-            combined = list(zip(texts, labels))
-            random.shuffle(combined)
-            texts, labels = zip(*combined)
-
-            cases.append({
-                'num_authors': NUM_AUTHORS,
-                'min_chunks_per_author': MINM_CHUNKS_PER_AUTHOR,
-                'chunks': list(texts),
-                '_ground_truth': list(labels)
-            })
-
-        return cases
+        return {
+            'num_authors': NUM_AUTHORS,
+            'min_chunks_per_author': MINM_CHUNKS_PER_AUTHOR,
+            'chunks': list(texts),
+            '_ground_truth': list(labels)
+        }`
 
     # Save test files
     def save_tests(self, task1, task2):
